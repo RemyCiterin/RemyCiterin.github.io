@@ -49,8 +49,8 @@ this set of events can happends in the CPU:
 | `0`  | `li t0, 42` enter the pipeline | `0`    | `r0 <- 42` | `{}`            | `{t0: r0}`         |
 | `1`  | `mv t1, t0` enter the pipeline | `1`    | `r1 <- r0` | `{unknown(r0)}` | `{t0: r0, t1: t1}` |
 | `2`  | `li t0, 43` enter the pipeline | `2`    | `r2 <- 43` | `{}`            | `{t0: r2, t1: t1}` |
-| `3`  | `li t0, 42` write-back         |        |            |                 | `{t0: r2, t1: t1}` |
-| `4`  | `mv t1, t0` write-back         |        |            |                 | `{t0: r2}`         |
+| `3`  | `li t0, 42` complete           |        |            |                 | `{t0: r2, t1: t1}` |
+| `4`  | `mv t1, t0` complete           |        |            |                 | `{t0: r2}`         |
 | `5`  | `mv t0, t1` enter the pipeline | `3`    | `r3 <- t1` | `{known(42)}`   | `{t0: r3}`         |
 |------|--------------------------------|--------|------------|-----------------|--------------------|
 
@@ -95,14 +95,39 @@ In particular, I saw in the outputs of nextpnr that the arrival of data from the
 
 ## Second try
 
-From what I saw in [Modern Processor Design](https://github.com/savitham1/books/blob/master/Modern%20Processor%20Design%20-%20Fundamentals%20of%20Superscalar%20Processors.pdf), there are two fundamental ways to transmit information from the register file to the execution units.
-There is the one I just presented called implicit renaming, but there is also another method called explicit renaming.
+Seeing that my method was not working well, I did some research and in particular found this [graph](https://docs.boom-core.org/en/latest/sections/rename-stage.html) in the [BOOM](https://boom-core.org/) documentation (a RISC-V out-of-order superscalar CPU).
+This graph explains that there are several types of renaming, implicit renaming which I have used so far, and explicit renaming.
+Then, I found more explanations by reading the chapter dedicated to register renaming in [Modern Processor Design](https://github.com/savitham1/books/blob/master/Modern%20Processor%20Design%20-%20Fundamentals%20of%20Superscalar%20Processors.pdf).
 
 This new method require two changes in the architecture:
 - First I don't transmit directly the data from the execution units to the issue queue; instead, I just inform it that the data is ready to be read in the register file at the next cycle. Then I read all the operands at the output of the issue queues. This adds one stage in the pipeline, reducing the performance of my CPU on the benchmarks but allowing it to run at a higher clock speed.
-- Then I switched to an explicit physical register file, instead of having registers in the architectural register file and the reorder buffer. Doing so, we need some kind of free-list to keep track of which register is available. But this also reduce the critical path, because now we can read in the alias table and in the register file at different cycles.
+- Then I switched to an explicit physical register file, instead of having registers in the architectural register file and the reorder buffer. Doing so, we need some kind of free-list to keep track of which register is available.
 
-There is also a good graph showing it in the documentation of [BOOM](https://docs.boom-core.org/en/latest/sections/rename-stage.html).
+
+In short, we now have four stages to consider instead of three:
+- the entry/dispatching of an instruction into the reorder buffer and issue queues (in order)
+- the reading of registers (out of order)
+- the writing of registers (out of order)
+- the completion/commit (in order)
+
+
+Using an explicit register file is necessary here, otherwise one could observe some bugs.
+Indeed, since registers are read out of order (after leaving the issue queues), the physical registers associated to an instruction must remain valid until another instruction writing to the same architectural register complete. At that point, all instructions that read the previous physical register are known to have also been committed too.
+But using the reorder buffer, the physical registers were only valid until the instruction left the circular buffer (at commit/completion stage), but could be reallocated from that instant.
+
+For example, this sequence of events is possible by using explicit renaming with the reorder buffer as a register file of size 2:
+
+```asm
+dispatch: li t0, 42      ; micro op: r0 <- 42
+dispatch: mv t1, t0      ; micro op: r1 <- r0
+write-back: li t0, 42    ; rob[r0] <- 42
+complete: li t0, 42      ; free(r0)
+dispatch: li t3, 43      ; micro op: r0 <- 43 (r0 is re-allocated)
+write-back: li t3, 43    ; rob[r0] <- 43
+register-read: mv t1, t0 ; read 43 into r0 (ERROR)
+```
+
+But with a dedicated physical register file and a free-list this is not possible as the register allocated for `t0` will only be freed when an instruction that also writes to `t0` is committed, and at that moment `mv t1, t0` will have already left the reorder buffer, because dispatch/stages are done in order.
 
 This optimization, with some others, improved the maximum clock frequency of my CPU from around 18 MHz to 27 MHz on my ECP5.
 Allowing me to play DOOM without overclocking my FPGA!
