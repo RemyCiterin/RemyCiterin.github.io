@@ -99,7 +99,7 @@ Seeing that my method was not working well, I did some research and in particula
 This graph explains that there are several types of renaming, implicit renaming which I have used so far, and explicit renaming.
 Then, I found more explanations by reading the chapter dedicated to register renaming in [Modern Processor Design](https://github.com/savitham1/books/blob/master/Modern%20Processor%20Design%20-%20Fundamentals%20of%20Superscalar%20Processors.pdf).
 
-This new method require two changes in the architecture:
+This new method requires two changes in the architecture:
 - First I don't transmit directly the data from the execution units to the issue queue; instead, I just inform it that the data is ready to be read in the register file at the next cycle. Then I read all the operands at the output of the issue queues. This adds one stage in the pipeline, reducing the performance of my CPU on the benchmarks but allowing it to run at a higher clock speed.
 - Then I switched to an explicit physical register file, instead of having registers in the architectural register file and the reorder buffer. Doing so, we need some kind of free-list to keep track of which register is available.
 
@@ -127,7 +127,7 @@ write-back: li t3, 43    ; rob[r0] <- 43
 register-read: mv t1, t0 ; read 43 into r0 (ERROR)
 ```
 
-But with a dedicated physical register file and a free-list this is not possible as the register allocated for `t0` will only be freed when an instruction that also writes to `t0` is committed, and at that moment `mv t1, t0` will have already left the reorder buffer, because dispatch/stages are done in order.
+But with a dedicated physical register file and a free-list this is not possible, as the register allocated for `t0` will only be freed when an instruction that also writes to `t0` is committed, and at that moment `mv t1, t0` will have already left the reorder buffer, because dispatch/stages are done in order.
 
 This optimization, with some others, improved the maximum clock frequency of my CPU from around 18 MHz to 27 MHz on my ECP5.
 Allowing me to play DOOM without overclocking my FPGA!
